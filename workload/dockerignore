@@ -1,0 +1,7 @@
+antithesis
+!antithesis/hermes/sut
+**/build
+**/node_modules
+**/.gradle
+hermes-console
+docs

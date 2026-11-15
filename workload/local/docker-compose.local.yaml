@@ -1,0 +1,15 @@
+# Local loop only (never launched): SDK output to a file, eventually controlled by env.
+services:
+  driver:
+    environment:
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /tmp/sdk.jsonl
+      DISABLE_EVENTUALLY: "1"
+      EVENTUALLY_AFTER_SECS: "${EVENTUALLY_AFTER_SECS:-}"
+  consumers1:
+    environment:
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /tmp/sdk.jsonl
+      WAIT_FOR_URL: "http://management:8090/groups"
+  consumers2:
+    environment:
+      ANTITHESIS_SDK_LOCAL_OUTPUT: /tmp/sdk.jsonl
+      WAIT_FOR_URL: "http://management:8090/groups"

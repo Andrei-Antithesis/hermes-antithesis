@@ -1,0 +1,245 @@
+diff --git a/hermes-consumers/build.gradle b/hermes-consumers/build.gradle
+index edb41ce8b4..b2ab632295 100644
+--- a/hermes-consumers/build.gradle
++++ b/hermes-consumers/build.gradle
+@@ -13,6 +13,7 @@ configurations {
+ 
+ dependencies {
+     implementation project(':hermes-common')
++    implementation group: 'com.antithesis', name: 'sdk', version: '1.8.0'
+     api project(':hermes-tracker')
+     implementation project(':hermes-metrics')
+     implementation project(':hermes-schema')
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/antithesis/Details.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/antithesis/Details.java
+new file mode 100644
+index 0000000000..9426d81fd0
+--- /dev/null
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/antithesis/Details.java
+@@ -0,0 +1,39 @@
++package pl.allegro.tech.hermes.consumers.antithesis;
++
++import com.fasterxml.jackson.databind.node.JsonNodeFactory;
++import com.fasterxml.jackson.databind.node.ObjectNode;
++
++/** Builds details objects for Antithesis SDK assertions (added for Antithesis testing). */
++public final class Details {
++  private Details() {}
++
++  private static final java.util.regex.Pattern ID =
++      java.util.regex.Pattern.compile("\"id\"\\s*:\\s*(\\d+)");
++
++  /** The workload's message ids ("id" fields) found in a batch body, for correlating loss. */
++  public static String payloadIds(java.nio.ByteBuffer content) {
++    try {
++      java.nio.ByteBuffer d = content.duplicate();
++      d.rewind();
++      byte[] bytes = new byte[Math.min(d.remaining(), 65536)];
++      d.get(bytes);
++      java.util.regex.Matcher m =
++          ID.matcher(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
++      StringBuilder sb = new StringBuilder();
++      while (m.find()) {
++        sb.append(sb.length() == 0 ? "" : ",").append(m.group(1));
++      }
++      return sb.toString();
++    } catch (RuntimeException e) {
++      return "error: " + e;
++    }
++  }
++
++  public static ObjectNode of(Object... kv) {
++    ObjectNode node = JsonNodeFactory.instance.objectNode();
++    for (int i = 0; i + 1 < kv.length; i += 2) {
++      node.put(String.valueOf(kv[i]), String.valueOf(kv[i + 1]));
++    }
++    return node;
++  }
++}
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
+index f8963b7823..1c1f1f6a79 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
+@@ -1,5 +1,7 @@
+ package pl.allegro.tech.hermes.consumers.consumer;
+ 
++import com.antithesis.sdk.Assert;
++import pl.allegro.tech.hermes.consumers.antithesis.Details;
+ import static com.github.rholder.retry.WaitStrategies.fixedWait;
+ import static java.util.Optional.of;
+ import static java.util.concurrent.TimeUnit.MILLISECONDS;
+@@ -220,6 +222,9 @@ public class BatchConsumer implements Consumer {
+   @Override
+   public void updateTopic(Topic newTopic) {
+     if (this.topic.getContentType() != newTopic.getContentType() || messageSizeChanged(newTopic)) {
++      Assert.reachable(
++          "consumers: batch consumer reinitialized on topic update",
++          Details.of("subscription", subscription.getQualifiedName()));
+       logger.info("Reinitializing message receiver, contentType or messageSize changed.");
+       this.topic = newTopic;
+       tearDown();
+@@ -319,7 +324,8 @@ public class BatchConsumer implements Consumer {
+       Runnable signalsInterrupt, MessageBatch batch, Retryer<MessageSendingResult> retryer) {
+     metrics.recordAttempt(batch.getMessageCount());
+     try (HermesTimerContext ignored = metrics.latencyTimer().time()) {
+-      retryer.call(
++      long startedAt = System.currentTimeMillis();
++      MessageSendingResult finalResult = retryer.call(
+           () -> {
+             loadRecorder.recordSingleOperation();
+             signalsInterrupt.run();
+@@ -329,6 +335,27 @@ public class BatchConsumer implements Consumer {
+                 subscription.getEndpointAddressResolverMetadata(),
+                 subscription.getBatchSubscriptionPolicy().getRequestTimeout());
+           });
++      boolean ttlExpired =
++          System.currentTimeMillis() - startedAt
++              > SECONDS.toMillis(subscription.getBatchSubscriptionPolicy().getMessageTtl());
++      boolean legitimate =
++          finalResult == null
++              || finalResult.succeeded()
++              || (finalResult.isClientError()
++                  && !subscription.getBatchSubscriptionPolicy().isRetryClientErrors())
++              || ttlExpired;
++      Assert.always(
++          legitimate,
++          "consumers: batch offsets are marked processed only after delivery, a non-retried client error or TTL expiry",
++          Details.of(
++              "subscription", subscription.getQualifiedName(),
++              "batchId", batch.getId(),
++              "messages", batch.getMessageCount(),
++              "consuming", consuming,
++              "status", finalResult == null ? "null" : finalResult.getStatusCode(),
++              "rootCause", finalResult == null ? "null" : finalResult.getRootCause(),
++              "partitionOffsets", batch.getPartitionOffsets(),
++              "payloadIds", legitimate ? "" : Details.payloadIds(batch.getContent())));
+     } catch (Exception e) {
+       if (hasInterruptedException(e)) {
+         logger.info(
+@@ -336,6 +363,9 @@ public class BatchConsumer implements Consumer {
+             batch.getId(),
+             subscription.getQualifiedName(),
+             e);
++        Assert.reachable(
++            "consumers: batch delivery interrupted",
++            Details.of("subscription", subscription.getQualifiedName(), "batchId", batch.getId()));
+         metrics.recordAttemptAsFinished(batch.getMessageCount());
+         logger.info("Restoring interrupted status", e);
+         Thread.currentThread().interrupt();
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/ConsumerMessageSender.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/ConsumerMessageSender.java
+index 25a8477d60..018ef29c49 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/ConsumerMessageSender.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/ConsumerMessageSender.java
+@@ -1,5 +1,7 @@
+ package pl.allegro.tech.hermes.consumers.consumer;
+ 
++import com.antithesis.sdk.Assert;
++import pl.allegro.tech.hermes.consumers.antithesis.Details;
+ import static org.apache.commons.lang3.math.NumberUtils.INTEGER_ZERO;
+ import static pl.allegro.tech.hermes.common.logging.LoggingFields.SUBSCRIPTION_NAME;
+ import static pl.allegro.tech.hermes.consumers.consumer.offset.SubscriptionPartitionOffset.subscriptionPartitionOffset;
+@@ -322,6 +324,16 @@ public class ConsumerMessageSender {
+ 
+   private void handleMessageDiscarding(
+       Message message, MessageSendingResult result, ConsumerProfiler profiler) {
++    Assert.unreachable(
++        "consumers: serial consumer discarded a message",
++        Details.of(
++            "subscription", subscription.getQualifiedName(),
++            "messageId", message.getId(),
++            "partition", message.getPartition(),
++            "offset", message.getOffset(),
++            "status", result.getStatusCode(),
++            "clientError", result.isClientError(),
++            "rootCause", result.getRootCause()));
+     pendingOffsets.markAsProcessed(
+         subscriptionPartitionOffset(
+             subscription.getQualifiedName(),
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitter.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitter.java
+index a3fdc65409..e46995ee86 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitter.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitter.java
+@@ -1,5 +1,7 @@
+ package pl.allegro.tech.hermes.consumers.consumer.offset;
+ 
++import com.antithesis.sdk.Assert;
++import pl.allegro.tech.hermes.consumers.antithesis.Details;
+ import com.google.common.collect.Sets;
+ import java.util.ArrayList;
+ import java.util.HashMap;
+@@ -135,6 +137,10 @@ public class OffsetCommitter {
+           long maxCommitted = maxCommittedOffsets.getOrDefault(partition, Long.MAX_VALUE);
+ 
+           long offsetToBeCommitted = Math.min(minInflight, maxCommitted);
++          Assert.sometimes(
++              minInflight < maxCommitted && maxCommitted < Long.MAX_VALUE,
++              "consumers: offset commit held back by an older inflight message",
++              Details.of("partition", partition, "minInflight", minInflight, "maxCommitted", maxCommitted));
+           if (offsetToBeCommitted >= 0 && offsetToBeCommitted < Long.MAX_VALUE) {
+             scheduledToCommitCount++;
+             offsetsToCommit.add(new SubscriptionPartitionOffset(partition, offsetToBeCommitted));
+@@ -157,6 +163,10 @@ public class OffsetCommitter {
+       }
+       processedOffsetToBeRemoved.forEach(maxCommittedOffsets::remove);
+ 
++      Assert.sometimes(
++          obsoleteCount > 0,
++          "consumers: offsets from an obsolete partition-assignment term were dropped",
++          Details.of("obsoleteCount", obsoleteCount));
+       obsoleteCounter.increment(obsoleteCount);
+       committedCounter.increment(scheduledToCommitCount);
+ 
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitterConsumerRebalanceListener.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitterConsumerRebalanceListener.java
+index 3b296a7d68..0160e57123 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitterConsumerRebalanceListener.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/offset/OffsetCommitterConsumerRebalanceListener.java
+@@ -1,5 +1,7 @@
+ package pl.allegro.tech.hermes.consumers.consumer.offset;
+ 
++import com.antithesis.sdk.Assert;
++import pl.allegro.tech.hermes.consumers.antithesis.Details;
+ import static java.util.stream.Collectors.toSet;
+ 
+ import java.util.Collection;
+@@ -21,6 +23,10 @@ public class OffsetCommitterConsumerRebalanceListener implements ConsumerRebalan
+ 
+   @Override
+   public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
++    Assert.sometimes(
++        !partitions.isEmpty(),
++        "consumers: Kafka revoked partitions from a running Hermes consumer",
++        Details.of("subscription", name, "partitions", partitions));
+     state.revoke(name, integerPartitions(partitions));
+   }
+ 
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/receiver/kafka/KafkaSingleThreadedMessageReceiver.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/receiver/kafka/KafkaSingleThreadedMessageReceiver.java
+index 16a886b288..a51979b039 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/receiver/kafka/KafkaSingleThreadedMessageReceiver.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/receiver/kafka/KafkaSingleThreadedMessageReceiver.java
+@@ -1,5 +1,7 @@
+ package pl.allegro.tech.hermes.consumers.consumer.receiver.kafka;
+ 
++import com.antithesis.sdk.Assert;
++import pl.allegro.tech.hermes.consumers.antithesis.Details;
+ import com.google.common.collect.ImmutableList;
+ import java.time.Duration;
+ import java.util.Collection;
+@@ -194,6 +196,9 @@ public class KafkaSingleThreadedMessageReceiver implements MessageReceiver {
+     } catch (Exception ex) {
+       logger.error(
+           "Error while committing offset for subscription {}", subscription.getQualifiedName(), ex);
++      Assert.reachable(
++          "consumers: offset commit to Kafka failed",
++          Details.of("subscription", subscription.getQualifiedName(), "error", ex.toString()));
+       failuresCounter.increment();
+     }
+   }
+@@ -215,6 +220,9 @@ public class KafkaSingleThreadedMessageReceiver implements MessageReceiver {
+           skippedCounter.increment();
+         }
+       } else {
++        Assert.reachable(
++            "consumers: commit of an offset from an obsolete partition-assignment term skipped",
++            Details.of("partition", partitionOffset.getPartition(), "term", partitionOffset.getPartitionAssignmentTerm()));
+         logger.warn(
+             "Consumer is not assigned to partition {} of subscription {} at current term {},"
+                 + " ignoring offset {} from term {} to commit",

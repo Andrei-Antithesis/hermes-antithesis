@@ -1,0 +1,55 @@
+spring:
+  jersey:
+    type: filter
+    filter:
+      order: 2147483647
+
+server:
+  port: 8090
+
+management:
+  zookeeper:
+    clusters:
+      - datacenter: dc
+        root: /run/hermes
+        connectionString: zk:2181
+  kafka:
+    clusters:
+      - datacenter: dc
+        clusterName: primary-dc
+        connectionTimeout: 3000
+        brokerList: kafka1:9092,kafka2:9092,kafka3:9092
+  endpoints:
+    web:
+      base-path: /
+  rest-template:
+    connect-timeout: 2000
+    read-timeout: 2000
+  backend:
+    port: 8090
+    servlet:
+      context-path: /
+  health:
+    enabled: true
+  consumer-groups:
+    create-manually: true
+  leadership:
+    zookeeper-dc: dc
+  audit.enabled: false
+  cache:
+    topicOwnerRefreshRateInSeconds: 300 # 5 minutes
+    subscriptionOwnerRefreshRateInSeconds: 300
+  schema.repository:
+    type: schema_registry
+    serverUrl: http://localhost:1
+    validationEnabled: false
+  prometheus:
+    client:
+      enabled: true
+      externalMonitoringUrl: http://localhost:1
+  topic:
+    replicationFactor: 3
+    partitions: 4
+    allowRemoval: true
+    touchSchedulerEnabled: false
+    subscriptionsAssignmentsCompletedTimeoutSeconds: 10

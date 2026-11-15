@@ -1,0 +1,7 @@
+# Overlay for repro_startup.sh: every Hermes node starts at once (no waiting for management),
+# plus a second frontend and consumers node so more nodes race on the fresh ZooKeeper.
+services:
+  frontend1: {environment: {WAIT_FOR_URL: ""}}
+  consumers1: {environment: {WAIT_FOR_URL: ""}}
+  frontend2: {image: "hermes-frontend:${HERMES_TAG:-upstream-2.22.2}", hostname: frontend2}
+  consumers2: {image: "hermes-consumers:${HERMES_TAG:-upstream-2.22.2}", hostname: consumers2}

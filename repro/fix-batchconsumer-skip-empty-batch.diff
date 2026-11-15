@@ -1,0 +1,15 @@
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
+index f8963b7823..49a0c9e1c0 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
+@@ -112,6 +112,10 @@ public class BatchConsumer implements Consumer {
+ 
+       inflight.ifPresent(
+           batch -> {
++            if (batch.isEmpty()) {
++              // receiver was stopped (e.g. by updateTopic) before any message arrived
++              return;
++            }
+             logger.debug("Delivering batch [subscription={}].", subscription.getQualifiedName());
+ 
+             deliver(

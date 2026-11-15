@@ -1,0 +1,12 @@
+diff --git a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
+index f8963b7823..0c8a63ef1c 100644
+--- a/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
++++ b/hermes-consumers/src/main/java/pl/allegro/tech/hermes/consumers/consumer/BatchConsumer.java
+@@ -172,6 +172,7 @@ public class BatchConsumer implements Consumer {
+ 
+   @Override
+   public void initialize() {
++    consuming = true;
+     loadRecorder.initialize();
+     logger.debug(
+         "Consumer: preparing receiver for subscription {}", subscription.getQualifiedName());
