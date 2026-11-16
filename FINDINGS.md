@@ -1,7 +1,5 @@
 # Hermes 2.22.2: findings from Antithesis
 
-Runs: `c420dffa965886ed43cc94f87f98678b-67-0` (run 2) and `acbc4c843f3ec6d427d8400d2e3bc2e5-67-0` (run 3, clean harness;
-failing: batch-offset 85, end-to-end loss 48, suspended delivery 38, empty JSON 147; recovery passed).
 Workload in `workload/`. All four findings reproduce on unmodified 2.22.2 in plain
 Docker: see `repro/` (includes the verified one-line fix for finding 1).
 Earlier run `4902034c…` ended at setup because of a workload classpath problem (fixed).
@@ -90,10 +88,3 @@ the workload avoids it by making frontends and consumers wait for management.
 starts lost a frontend on unmodified 2.22.2. **Fix (verified, 0 of 10 with all nodes healthy):** catch
 `KeeperException.NodeExistsException` around the create and treat it as success
 (`repro/fix-zookeeper-ensurepathexists-race.diff`).
-
-## Workload issues fixed for the next run (not Hermes bugs)
-
-- Antithesis injects `slf4j-simple` next to instrumented jars. Logging is now pinned to Logback in `workload/sut/run.sh`.
-- `curl` in `workload/sut/run.sh` had no timeout, so a restart during a management fault hung frontend1.
-- KRaft brokers restarted into a partition exit after `initial.broker.registration.timeout.ms`.
-  The timeout is now raised, because Antithesis doesn't restart containers that exit on their own.
