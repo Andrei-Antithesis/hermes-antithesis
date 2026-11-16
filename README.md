@@ -1,6 +1,6 @@
 # Hermes 2.22.2: at-least-once delivery bugs, found with Antithesis
 
-**TL;DR:** in Hermes 2.22.2, after a topic update that reinitialises the batch receiver, a BATCH subscription can
+In Hermes 2.22.2, after a topic update that reinitialises the batch receiver, a BATCH subscription can
 permanently skip messages that the frontend acknowledged with `201`. The messages are never delivered, never retried and
 never logged as discarded, and their offsets are committed. The fix is one line. All four bugs reproduce on the
 **unmodified 2.22.2 code** with plain Docker in minutes (configuration used is noted under each bug).
