@@ -219,4 +219,4 @@ FINDINGS.md   full technical write-up with evidence
 These bugs have not been reported upstream yet. We wanted to share them with the Hermes team first.
 We'd be glad to walk through the timelines, help get a fix in, or run this workload against your CI builds so
 regressions like #1891 or #1908 are caught before release.
-Contact: [Andrei-Antithesis](https://github.com/Andrei-Antithesis) · [antithesis.com](https://antithesis.com)
+Contact: [Andrei-Antithesis](https://www.linkedin.com/in/andrei-chesnoiu/) · [antithesis.com](https://antithesis.com)
