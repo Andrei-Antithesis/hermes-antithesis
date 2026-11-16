@@ -2,7 +2,6 @@
 
 Workload in `workload/`. All four findings reproduce on unmodified 2.22.2 in plain
 Docker: see `repro/` (includes the verified one-line fix for finding 1).
-Earlier run `4902034c…` ended at setup because of a workload classpath problem (fixed).
 
 ## 1. Batch subscriptions lose acknowledged messages after a topic update (HIGH)
 
